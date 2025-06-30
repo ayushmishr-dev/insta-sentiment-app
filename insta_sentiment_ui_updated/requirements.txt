@@ -3,3 +3,5 @@ apify-client
 pandas
 matplotlib
 vaderSentiment
+scikit-learn
+nltk

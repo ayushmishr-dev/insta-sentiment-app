@@ -4,6 +4,14 @@ import matplotlib.pyplot as plt
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from apify_client import ApifyClient
 import base64
+import nltk
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.decomposition import LatentDirichletAllocation
+from nltk.corpus import stopwords
+
+# Download NLTK stopwords
+nltk.download('stopwords')
+stop_words = stopwords.words('english')
 
 st.set_page_config(page_title="Instagram Comment Sentiment Analyzer", layout="centered")
 st.title("📊 Instagram Comment Sentiment Analyzer")
@@ -12,6 +20,7 @@ post_url = st.text_input("📥 Paste Instagram Post/Reel Link")
 
 if st.button("🚀 Run Sentiment Analysis") and post_url:
     with st.spinner("Extracting comments..."):
+        # Apify API Setup
         APIFY_TOKEN = "apify_api_qluL57quFZRFyhRCptedkDlrOtUvaW09WzdU"
         client = ApifyClient(APIFY_TOKEN)
 
@@ -31,7 +40,9 @@ if st.button("🚀 Run Sentiment Analysis") and post_url:
 
         df = pd.DataFrame(comments, columns=["Comment"])
 
+        # Sentiment Analysis
         analyzer = SentimentIntensityAnalyzer()
+
         def analyze_sentiment(comment):
             score = analyzer.polarity_scores(str(comment))
             compound = score['compound']
@@ -42,6 +53,7 @@ if st.button("🚀 Run Sentiment Analysis") and post_url:
             else:
                 sentiment = "Neutral"
             return pd.Series([compound, sentiment])
+
         df[['Compound Score', 'Sentiment']] = df['Comment'].apply(analyze_sentiment)
 
         positive_df = df[df["Sentiment"] == "Positive"][["Comment"]].rename(columns={"Comment": "Positive Comments"})
@@ -92,3 +104,38 @@ if st.button("🚀 Run Sentiment Analysis") and post_url:
         st.dataframe(neutral_df.head(5))
         st.markdown("**😡 Negative Comments:**")
         st.dataframe(negative_df.head(5))
+
+        # -----------------------------------------------
+        # 📌 Topic Modeling Section
+        st.subheader("🧠 Topic Modeling")
+
+        # Preprocess comments
+        processed_comments = df['Comment'].dropna().astype(str).str.lower()
+        vectorizer = CountVectorizer(stop_words=stop_words, max_df=0.95, min_df=2)
+        X = vectorizer.fit_transform(processed_comments)
+
+        lda = LatentDirichletAllocation(n_components=5, random_state=42)
+        lda.fit(X)
+
+        def get_topic_keywords(model, feature_names, n_top_words=5):
+            topics = []
+            for topic_idx, topic in enumerate(model.components_):
+                top_features = [feature_names[i] for i in topic.argsort()[:-n_top_words - 1:-1]]
+                topics.append(" ".join(top_features))
+            return topics
+
+        feature_names = vectorizer.get_feature_names_out()
+        topic_keywords = get_topic_keywords(lda, feature_names)
+
+        topic_assignments = lda.transform(X).argmax(axis=1)
+        comment_topics = [topic_keywords[i] for i in topic_assignments]
+
+        topic_df = pd.DataFrame({
+            'Comment': processed_comments,
+            'Topic': comment_topics
+        })
+
+        st.markdown("**🗂 Sample Topic Assignment:**")
+        st.dataframe(topic_df.head(5))
+
+        st.markdown(get_csv_download_link(topic_df, 'comment_topics.csv', '📥 Download Topic Modeling Results'), unsafe_allow_html=True)
